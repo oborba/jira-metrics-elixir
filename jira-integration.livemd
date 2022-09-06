@@ -1,0 +1,93 @@
+# Jira integration
+
+```elixir
+Mix.install([
+  {:httpoison, "~> 1.8"},
+  {:poison, "~> 5.0"},
+  {:timex, "~> 3.0"}
+])
+
+defmodule WipMetrics do
+  def time_in_progress(project) do
+    project
+    |> Map.get("issues")
+    |> Enum.filter(fn x ->
+      x["fields"]["status"]["statusCategory"]["key"] != "done" and
+        x["fields"]["status"]["statusCategory"]["key"] != "new"
+    end)
+    |> Enum.map(fn x ->
+      %{
+        created: x["fields"]["created"],
+        assignee: x["fields"]["assignee"],
+        summary: x["fields"]["summary"],
+        status_flow: x["fields"]["status"]["name"],
+        time_in_progress: format_wip_time(x["fields"]["created"])
+      }
+    end)
+  end
+
+  defp format_wip_time(api_created_time) do
+    {:ok, converted, 0} = api_created_time |> DateTime.from_iso8601()
+
+    days = Timex.diff(Timex.now(), converted, :days)
+    hours = rem(Timex.diff(Timex.now(), converted, :hours), 24)
+
+    "#{days}d #{hours}h"
+  end
+end
+
+defmodule JiraCredentials do
+  defstruct url: "", email: "", token: ""
+end
+```
+
+## Get details about user project list
+
+* Define Jira credentials with your Jira Basic Auth data
+* Request details about your projects
+* Show relevant info about each project
+
+```elixir
+credential = %JiraCredentials{
+  # Put your basic auth data
+  email: "",
+  token: "",
+  url: ""
+}
+
+projects =
+  "#{credential.url}/rest/api/3/project/search"
+  |> HTTPoison.get!(%{"Content-Type": "application/json"},
+    hackney: [basic_auth: {credential.email, credential.token}]
+  )
+  |> Map.get(:body)
+  |> Poison.decode!()
+  |> Map.get("values")
+  |> Enum.map(fn x -> %{id: x["id"], key: x["key"], name: x["name"]} end)
+```
+
+### Load full raw data from required project
+
+```elixir
+# Put here the project key
+project_key = ""
+
+project_data =
+  "#{credential.url}/rest/api/3/search?jql=project=#{project_key}&maxResults=1000"
+  |> HTTPoison.get!(%{"Content-Type": "application/json"},
+    hackney: [basic_auth: {credential.email, credential.token}]
+  )
+  |> Map.get(:body)
+  |> Poison.decode!()
+```
+
+## Metrics
+
+#### Project indicators
+
+*For now, the script are getting just the "Wip" metric
+
+```elixir
+project_data
+|> WipMetrics.time_in_progress()
+```
